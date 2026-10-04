@@ -35,7 +35,7 @@ canvas{display:block;width:100%;height:520px;max-height:65vh;touch-action:none}
   h1{font-size:16px;margin:0}.sub{display:none}
   .toolbar{
     display:grid;
-    grid-template-columns:repeat(5,minmax(0,1fr));
+    grid-template-columns:repeat(6,minmax(0,1fr));
     gap:4px;
     padding:6px 7px;
     position:sticky;
@@ -110,6 +110,14 @@ canvas{display:block;width:100%;height:520px;max-height:65vh;touch-action:none}
   canvas{height:300px}
   .hint{display:none}
 }
+
+.line-editor{background:var(--panel);border:1px solid #27303c;border-radius:11px;padding:9px 10px;min-width:0}
+.line-editor h2{font-size:13px;margin:0 0 7px}
+.line-controls{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:7px}
+.line-controls input,.line-controls select{width:100%;min-width:0;background:#0f141b;color:var(--text);border:1px solid #354050;border-radius:8px;padding:8px;font:inherit;font-size:12px}
+.line-actions{display:grid;grid-template-columns:1fr;gap:6px;margin-top:7px}
+@media(min-width:800px){.line-editor{grid-column:2}.editor{grid-row:auto}.wrap{grid-template-rows:auto auto auto}.hint{grid-row:auto}}
+@media(max-width:799px){.line-editor{order:4;width:100%;padding:7px 8px}.line-editor h2{font-size:11px;margin-bottom:5px}.line-controls{grid-template-columns:minmax(0,1fr) 95px}.line-controls input,.line-controls select{font-size:11px;padding:7px}.line-actions{grid-template-columns:1fr;margin-top:5px}.line-actions button{min-height:34px;font-size:10px}}
 </style>
 
 </head>
@@ -117,7 +125,7 @@ canvas{display:block;width:100%;height:520px;max-height:65vh;touch-action:none}
 <header><h1>ローソク足メーカー <span class="badge">最大10本</span></h1><div class="sub">教材・検証用のローソク足パターンを自由に作成</div></header>
 <div class="toolbar">
 <button class="up" id="addUp">＋ 陽線</button><button class="down" id="addDown">＋ 陰線</button>
-<button id="undo">↶ 戻す</button><button id="clear" class="danger">全削除</button><button id="save" class="primary">PNG保存</button>
+<button id="addLine">＋ ライン</button><button id="undo">↶ 戻す</button><button id="clear" class="danger">全削除</button><button id="save" class="primary">PNG保存</button>
 </div>
 <div class="wrap">
 <div class="stage"><canvas id="cv"></canvas></div>
@@ -132,40 +140,100 @@ canvas{display:block;width:100%;height:520px;max-height:65vh;touch-action:none}
 </div>
 <div class="row"><button id="toggle">陽線/陰線 反転</button><button id="left">← 左へ</button><button id="right">右へ →</button><button id="del" class="danger">この足を削除</button></div>
 </div>
+<div class="line-editor" id="lineEditor">
+<h2>水平ライン：<span id="lineSelLabel">なし</span></h2>
+<div class="line-controls">
+<input id="lineLabel" type="text" maxlength="40" placeholder="例：ラウンドナンバー / SMA20" disabled>
+<select id="lineStyle" disabled><option value="solid">実線</option><option value="dashed">点線</option></select>
+</div>
+<div class="line-actions"><button id="deleteLine" class="danger" disabled>このラインを削除</button></div>
+</div>
 </div>
 <script>
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 const $=id=>document.getElementById(id);
-const addUpBtn=$('addUp'), addDownBtn=$('addDown'), undoBtn=$('undo'), clearBtn=$('clear'), saveBtn=$('save');
-const delBtn=$('del'), toggleBtn=$('toggle'), leftBtn=$('left'), rightBtn=$('right');
-const hiEl=$('hi'), opEl=$('op'), clEl=$('cl'), loEl=$('lo');
-let candles=[],selected=-1,history=[],drag=null;
-function snap(){history.push(JSON.stringify(candles));if(history.length>40)history.shift()}
+const addUpBtn=$('addUp'),addDownBtn=$('addDown'),addLineBtn=$('addLine'),undoBtn=$('undo'),clearBtn=$('clear'),saveBtn=$('save');
+const delBtn=$('del'),toggleBtn=$('toggle'),leftBtn=$('left'),rightBtn=$('right');
+const hiEl=$('hi'),opEl=$('op'),clEl=$('cl'),loEl=$('lo');
+const lineLabelEl=$('lineLabel'),lineStyleEl=$('lineStyle'),deleteLineBtn=$('deleteLine');
+let candles=[],lines=[],selected=-1,selectedLine=-1,history=[],drag=null;
+
+function state(){return JSON.stringify({candles,lines})}
+function snap(){history.push(state());if(history.length>60)history.shift()}
+function restore(raw){const x=JSON.parse(raw);candles=x.candles||[];lines=x.lines||[];selected=Math.min(selected,candles.length-1);selectedLine=Math.min(selectedLine,lines.length-1);sync();draw()}
 function resize(){const dpr=devicePixelRatio||1,r=cv.getBoundingClientRect();cv.width=r.width*dpr;cv.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);draw()}
 addEventListener('resize',resize);
-function add(up){if(candles.length>=10)return; snap(); const base=50+(Math.random()*10-5); candles.push(up?{h:75,o:42,c:62,l:25}:{h:75,o:62,c:42,l:25}); selected=candles.length-1;sync();draw()}
-function geom(i){const w=cv.clientWidth,h=cv.clientHeight,n=Math.max(candles.length,1);const preferredGap=82;const sideMargin=36;const slot=Math.min(preferredGap,(w-sideMargin*2)/Math.max(n-1,1));const center=w/2;const x=center+(i-(n-1)/2)*slot;const bw=Math.min(42,slot*.52);return{x,bw,h}}
-function y(v){return 20+(100-v)/100*(cv.clientHeight-40)} function val(py){return Math.max(0,Math.min(100,100-(py-20)/(cv.clientHeight-40)*100))}
-function draw(exporting=false){const w=cv.clientWidth,h=cv.clientHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#0b0e13';ctx.fillRect(0,0,w,h);
-ctx.strokeStyle='#202733';ctx.lineWidth=1;for(let i=1;i<6;i++){let yy=i*h/6;ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(w,yy);ctx.stroke()}
-for(let i=0;i<candles.length;i++){const c=candles[i],g=geom(i),up=c.c>=c.o,col=up?'#ef5350':'#26a69a';ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(g.x,y(c.h));ctx.lineTo(g.x,y(c.l));ctx.stroke();let yt=Math.min(y(c.o),y(c.c)),yb=Math.max(y(c.o),y(c.c));ctx.fillRect(g.x-g.bw/2,yt,g.bw,Math.max(3,yb-yt));
-if(i===selected&&!exporting){ctx.strokeStyle='#70b7ff';ctx.lineWidth=2;ctx.strokeRect(g.x-g.bw/2-5,y(c.h)-9,g.bw+10,y(c.l)-y(c.h)+18);[['h',c.h],['o',c.o],['c',c.c],['l',c.l]].forEach(([k,v])=>{ctx.beginPath();ctx.fillStyle='#e9f4ff';ctx.strokeStyle='#4da3ff';ctx.arc(g.x,y(v),6,0,Math.PI*2);ctx.fill();ctx.stroke()})}
-// 左からの足番号。PNG保存時にも描画される。
-ctx.save();ctx.font='600 14px system-ui, -apple-system, Segoe UI, sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillStyle='#b8c2cf';ctx.fillText(String(i+1),g.x,h-5);ctx.restore();}
+
+function add(up){if(candles.length>=10)return;snap();candles.push(up?{h:75,o:42,c:62,l:25}:{h:75,o:62,c:42,l:25});selected=candles.length-1;selectedLine=-1;sync();draw()}
+function addLine(){snap();lines.push({v:50,label:'',style:'solid'});selectedLine=lines.length-1;selected=-1;sync();draw()}
+
+function geom(i){const w=cv.clientWidth,n=Math.max(candles.length,1),preferredGap=82,sideMargin=36;const slot=Math.min(preferredGap,(w-sideMargin*2)/Math.max(n-1,1));const center=w/2,x=center+(i-(n-1)/2)*slot,bw=Math.min(42,slot*.52);return{x,bw}}
+function y(v){return 20+(100-v)/100*(cv.clientHeight-40)}
+function val(py){return Math.max(0,Math.min(100,100-(py-20)/(cv.clientHeight-40)*100))}
+
+function draw(exporting=false){
+ const w=cv.clientWidth,h=cv.clientHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#0b0e13';ctx.fillRect(0,0,w,h);
+ ctx.strokeStyle='#202733';ctx.lineWidth=1;ctx.setLineDash([]);for(let i=1;i<6;i++){let yy=i*h/6;ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(w,yy);ctx.stroke()}
+ // Horizontal lines behind candles.
+ for(let i=0;i<lines.length;i++){
+   const ln=lines[i],yy=y(ln.v);ctx.save();ctx.strokeStyle=i===selectedLine&&!exporting?'#70b7ff':'#d5a84b';ctx.lineWidth=i===selectedLine&&!exporting?2.5:2;ctx.setLineDash(ln.style==='dashed'?[8,6]:[]);
+   ctx.beginPath();ctx.moveTo(8,yy);ctx.lineTo(w-8,yy);ctx.stroke();ctx.setLineDash([]);
+   if(ln.label){ctx.font='600 12px system-ui,-apple-system,"Noto Sans JP",sans-serif';ctx.textAlign='right';ctx.textBaseline='bottom';const tw=ctx.measureText(ln.label).width;ctx.fillStyle='#0b0e13cc';ctx.fillRect(Math.max(4,w-12-tw-8),yy-18,tw+8,17);ctx.fillStyle='#e7c979';ctx.fillText(ln.label,w-12,yy-3)}
+   if(i===selectedLine&&!exporting){ctx.fillStyle='#e9f4ff';ctx.strokeStyle='#4da3ff';ctx.beginPath();ctx.arc(16,yy,6,0,Math.PI*2);ctx.fill();ctx.stroke()}
+   ctx.restore();
+ }
+ for(let i=0;i<candles.length;i++){
+   const c=candles[i],g=geom(i),up=c.c>=c.o,col=up?'#ef5350':'#26a69a';ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=2;ctx.setLineDash([]);
+   ctx.beginPath();ctx.moveTo(g.x,y(c.h));ctx.lineTo(g.x,y(c.l));ctx.stroke();let yt=Math.min(y(c.o),y(c.c)),yb=Math.max(y(c.o),y(c.c));ctx.fillRect(g.x-g.bw/2,yt,g.bw,Math.max(3,yb-yt));
+   if(i===selected&&!exporting){ctx.strokeStyle='#70b7ff';ctx.lineWidth=2;ctx.strokeRect(g.x-g.bw/2-5,y(c.h)-9,g.bw+10,y(c.l)-y(c.h)+18);[['h',c.h],['o',c.o],['c',c.c],['l',c.l]].forEach(([k,v])=>{ctx.beginPath();ctx.fillStyle='#e9f4ff';ctx.strokeStyle='#4da3ff';ctx.arc(g.x,y(v),6,0,Math.PI*2);ctx.fill();ctx.stroke()})}
+   ctx.save();ctx.font='600 14px system-ui,-apple-system,Segoe UI,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillStyle='#b8c2cf';ctx.fillText(String(i+1),g.x,h-5);ctx.restore();
+ }
 }
-function hit(px,py){for(let i=candles.length-1;i>=0;i--){let g=geom(i),c=candles[i];if(Math.abs(px-g.x)<g.bw*.8&&py>=y(c.h)-14&&py<=y(c.l)+14)return i}return -1}
+
+function hitCandle(px,py){for(let i=candles.length-1;i>=0;i--){let g=geom(i),c=candles[i];if(Math.abs(px-g.x)<g.bw*.8&&py>=y(c.h)-14&&py<=y(c.l)+14)return i}return -1}
+function hitLine(py){let best=-1,dist=13;for(let i=lines.length-1;i>=0;i--){let d=Math.abs(py-y(lines[i].v));if(d<dist){dist=d;best=i}}return best}
 function pointer(e){const r=cv.getBoundingClientRect(),p=e.touches?e.touches[0]:e;return{x:p.clientX-r.left,y:p.clientY-r.top}}
-function start(e){e.preventDefault();let p=pointer(e),i=hit(p.x,p.y);if(i<0){selected=-1;sync();draw();return}selected=i;sync();let c=candles[i],keys=['h','o','c','l'],nearest=keys.map(k=>[k,Math.abs(p.y-y(c[k]))]).sort((a,b)=>a[1]-b[1])[0];snap();drag={key:nearest[1]<12?nearest[0]:'all',startY:p.y,orig:{...c}};draw()}
-function move(e){if(!drag||selected<0)return;e.preventDefault();let p=pointer(e),c=candles[selected];if(drag.key==='all'){let dv=val(p.y)-val(drag.startY);for(let k of ['h','o','c','l'])c[k]=Math.max(0,Math.min(100,drag.orig[k]+dv))}else c[drag.key]=val(p.y);normalize(c,drag.key);sync();draw()}
+
+function start(e){
+ e.preventDefault();const p=pointer(e),ci=hitCandle(p.x,p.y);
+ if(ci>=0){selected=ci;selectedLine=-1;sync();const c=candles[ci],keys=['h','o','c','l'],nearest=keys.map(k=>[k,Math.abs(p.y-y(c[k]))]).sort((a,b)=>a[1]-b[1])[0];snap();drag={type:'candle',key:nearest[1]<12?nearest[0]:'all',startY:p.y,orig:{...c}};draw();return}
+ const li=hitLine(p.y);
+ if(li>=0){selectedLine=li;selected=-1;sync();snap();drag={type:'line'};draw();return}
+ selected=-1;selectedLine=-1;sync();draw();
+}
+function move(e){
+ if(!drag)return;e.preventDefault();const p=pointer(e);
+ if(drag.type==='line'&&selectedLine>=0){lines[selectedLine].v=val(p.y);draw();return}
+ if(drag.type==='candle'&&selected>=0){let c=candles[selected];if(drag.key==='all'){let dv=val(p.y)-val(drag.startY);for(let k of ['h','o','c','l'])c[k]=Math.max(0,Math.min(100,drag.orig[k]+dv))}else c[drag.key]=val(p.y);normalize(c,drag.key);sync();draw()}
+}
 function end(){drag=null}
 function normalize(c,key){c.h=Math.max(c.h,c.o,c.c,c.l);c.l=Math.min(c.l,c.o,c.c,c.h);if(key==='h'){c.o=Math.min(c.o,c.h);c.c=Math.min(c.c,c.h);c.l=Math.min(c.l,c.h)}if(key==='l'){c.o=Math.max(c.o,c.l);c.c=Math.max(c.c,c.l);c.h=Math.max(c.h,c.l)}}
-cv.addEventListener('mousedown',start);cv.addEventListener('mousemove',move);addEventListener('mouseup',end);cv.addEventListener('touchstart',start,{passive:false});cv.addEventListener('touchmove',move,{passive:false});cv.addEventListener('touchend',end);
-function sync(){let c=candles[selected];document.getElementById('selLabel').textContent=c?`${selected+1}本目（${c.c>=c.o?'陽線':'陰線'}）`:'なし';for(let id of ['hi','op','cl','lo'])document.getElementById(id).disabled=!c;if(c){hiEl.value=c.h;opEl.value=c.o;clEl.value=c.c;loEl.value=c.l}}
-[['hi','h'],['op','o'],['cl','c'],['lo','l']].forEach(([id,k])=>document.getElementById(id).oninput=e=>{if(selected<0)return;candles[selected][k]=+e.target.value;normalize(candles[selected],k);sync();draw()});
-addUpBtn.onclick=()=>add(true);addDownBtn.onclick=()=>add(false);undoBtn.onclick=()=>{if(!history.length)return;candles=JSON.parse(history.pop());selected=Math.min(selected,candles.length-1);sync();draw()};clearBtn.onclick=()=>{if(!candles.length)return;snap();candles=[];selected=-1;sync();draw()};
-delBtn.onclick=()=>{if(selected<0)return;snap();candles.splice(selected,1);selected=Math.min(selected,candles.length-1);sync();draw()};toggleBtn.onclick=()=>{if(selected<0)return;snap();const c=candles[selected];const tmp=c.o;c.o=c.c;c.c=tmp;sync();draw()};
-leftBtn.onclick=()=>{if(selected<=0)return;snap();[candles[selected-1],candles[selected]]=[candles[selected],candles[selected-1]];selected--;sync();draw()};rightBtn.onclick=()=>{if(selected<0||selected>=candles.length-1)return;snap();[candles[selected+1],candles[selected]]=[candles[selected],candles[selected+1]];selected++;sync();draw()};
-saveBtn.onclick=()=>{let old=selected;selected=-1;draw(true);const a=document.createElement('a');a.download='candlestick-pattern.png';a.href=cv.toDataURL('image/png');a.click();selected=old;draw()};
-add(true);add(false);add(true);history=[];resize();
+
+cv.addEventListener('mousedown',start);cv.addEventListener('mousemove',move);addEventListener('mouseup',end);
+cv.addEventListener('touchstart',start,{passive:false});cv.addEventListener('touchmove',move,{passive:false});cv.addEventListener('touchend',end);
+
+function sync(){
+ const c=candles[selected];$('selLabel').textContent=c?`${selected+1}本目（${c.c>=c.o?'陽線':'陰線'}）`:'なし';
+ for(const id of ['hi','op','cl','lo'])$(id).disabled=!c;
+ if(c){hiEl.value=c.h;opEl.value=c.o;clEl.value=c.c;loEl.value=c.l}
+ const ln=lines[selectedLine];$('lineSelLabel').textContent=ln?`${selectedLine+1}本目`:'なし';lineLabelEl.disabled=!ln;lineStyleEl.disabled=!ln;deleteLineBtn.disabled=!ln;
+ if(ln){lineLabelEl.value=ln.label;lineStyleEl.value=ln.style}else{lineLabelEl.value='';lineStyleEl.value='solid'}
+}
+[['hi','h'],['op','o'],['cl','c'],['lo','l']].forEach(([id,k])=>$(id).oninput=e=>{if(selected<0)return;candles[selected][k]=+e.target.value;normalize(candles[selected],k);sync();draw()});
+
+addUpBtn.onclick=()=>add(true);addDownBtn.onclick=()=>add(false);addLineBtn.onclick=addLine;
+undoBtn.onclick=()=>{if(history.length)restore(history.pop())};
+clearBtn.onclick=()=>{if(!candles.length&&!lines.length)return;snap();candles=[];lines=[];selected=-1;selectedLine=-1;sync();draw()};
+delBtn.onclick=()=>{if(selected<0)return;snap();candles.splice(selected,1);selected=Math.min(selected,candles.length-1);sync();draw()};
+toggleBtn.onclick=()=>{if(selected<0)return;snap();const c=candles[selected];[c.o,c.c]=[c.c,c.o];sync();draw()};
+leftBtn.onclick=()=>{if(selected<=0)return;snap();[candles[selected-1],candles[selected]]=[candles[selected],candles[selected-1]];selected--;sync();draw()};
+rightBtn.onclick=()=>{if(selected<0||selected>=candles.length-1)return;snap();[candles[selected+1],candles[selected]]=[candles[selected],candles[selected+1]];selected++;sync();draw()};
+lineLabelEl.addEventListener('focus',()=>{if(selectedLine>=0)snap()});
+lineLabelEl.addEventListener('input',e=>{if(selectedLine<0)return;lines[selectedLine].label=e.target.value;draw()});
+lineStyleEl.addEventListener('change',e=>{if(selectedLine<0)return;snap();lines[selectedLine].style=e.target.value;draw()});
+deleteLineBtn.onclick=()=>{if(selectedLine<0)return;snap();lines.splice(selectedLine,1);selectedLine=Math.min(selectedLine,lines.length-1);sync();draw()};
+saveBtn.onclick=()=>{const oldC=selected,oldL=selectedLine;selected=-1;selectedLine=-1;draw(true);const a=document.createElement('a');a.download='candlestick-pattern.png';a.href=cv.toDataURL('image/png');a.click();selected=oldC;selectedLine=oldL;draw()};
+
+add(true);add(false);add(true);history=[];resize();sync();
 </script>
 </body></html>
