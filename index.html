@@ -35,8 +35,8 @@ canvas{display:block;width:100%;height:520px;max-height:65vh;touch-action:none}
   h1{font-size:16px;margin:0}.sub{display:none}
   .toolbar{
     display:grid;
-    grid-template-columns:repeat(6,minmax(0,1fr));
-    gap:4px;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:5px;
     padding:6px 7px;
     position:sticky;
     top:0;
@@ -113,11 +113,45 @@ canvas{display:block;width:100%;height:520px;max-height:65vh;touch-action:none}
 
 .line-editor{background:var(--panel);border:1px solid #27303c;border-radius:11px;padding:9px 10px;min-width:0}
 .line-editor h2{font-size:13px;margin:0 0 7px}
-.line-controls{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:7px}
+.line-controls{display:grid;grid-template-columns:minmax(0,1fr) 105px;gap:7px}
 .line-controls input,.line-controls select{width:100%;min-width:0;background:#0f141b;color:var(--text);border:1px solid #354050;border-radius:8px;padding:8px;font:inherit;font-size:12px}
 .line-actions{display:grid;grid-template-columns:1fr;gap:6px;margin-top:7px}
-@media(min-width:800px){.line-editor{grid-column:2}.editor{grid-row:auto}.wrap{grid-template-rows:auto auto auto}.hint{grid-row:auto}}
-@media(max-width:799px){.line-editor{order:4;width:100%;padding:7px 8px}.line-editor h2{font-size:11px;margin-bottom:5px}.line-controls{grid-template-columns:minmax(0,1fr) 95px}.line-controls input,.line-controls select{font-size:11px;padding:7px}.line-actions{grid-template-columns:1fr;margin-top:5px}.line-actions button{min-height:34px;font-size:10px}}
+
+/* PC: v6のチャート幅を維持し、右カラムに編集パネルを縦積み */
+@media(min-width:800px){
+  .wrap{
+    grid-template-columns:minmax(0,1fr) 300px;
+    grid-template-rows:auto auto auto;
+  }
+  .stage{grid-column:1;grid-row:1 / span 2}
+  .hint{grid-column:1;grid-row:3}
+  .editor{grid-column:2;grid-row:1}
+  .line-editor{grid-column:2;grid-row:2;margin-top:0}
+}
+
+/* スマホ: チャート → 足編集 → ライン編集。横幅を圧迫しない */
+@media(max-width:799px){
+  .line-editor{order:4;width:100%;padding:7px 8px}
+  .line-editor h2{font-size:11px;margin-bottom:5px}
+  .line-controls{grid-template-columns:minmax(0,1fr) 92px;gap:5px}
+  .line-controls input,.line-controls select{font-size:11px;padding:7px}
+  .line-actions{margin-top:5px}
+  .line-actions button{min-height:34px;font-size:10px}
+}
+
+/* スマホ横向き: チャート左、編集系を右側に自然に積む */
+@media(max-width:799px) and (orientation:landscape){
+  .wrap{
+    display:grid;
+    grid-template-columns:minmax(0,1.65fr) minmax(220px,.8fr);
+    grid-template-rows:auto auto auto;
+    align-items:start;
+  }
+  .stage{grid-column:1;grid-row:1 / span 2}
+  .hint{grid-column:1;grid-row:3}
+  .editor{grid-column:2;grid-row:1}
+  .line-editor{grid-column:2;grid-row:2}
+}
 </style>
 
 </head>
