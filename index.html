@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Candle Maker</title>
+<meta name="theme-color" content="#0e1117" />
+<link rel="manifest" href="manifest.webmanifest" />
+<style>
+:root{--bg:#0e1117;--panel:#171c24;--line:#303846;--text:#eef2f7;--muted:#9aa6b2;--up:#ef5350;--down:#26a69a;--accent:#4da3ff}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;overflow-x:hidden}
+header{padding:14px 16px 8px} h1{font-size:20px;margin:0 0 4px} .sub{font-size:12px;color:var(--muted)}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;padding:10px 12px;background:var(--panel);border-block:1px solid #222a35;position:sticky;top:0;z-index:5}
+button{appearance:none;border:1px solid #354050;background:#222a35;color:#fff;border-radius:9px;padding:9px 12px;font-weight:700;font-size:13px;touch-action:manipulation}
+button:active{transform:translateY(1px)} .up{border-color:#713838}.down{border-color:#23645f}.primary{background:#1f5f9f;border-color:#327fc9}.danger{color:#ff9c9c}
+.wrap{padding:12px}.stage{background:#0b0e13;border:1px solid #27303c;border-radius:12px;overflow:hidden;box-shadow:0 8px 28px #0005}
+canvas{display:block;width:100%;height:440px;touch-action:none}.hint{font-size:12px;color:var(--muted);padding:10px 4px 2px;line-height:1.6}
+.editor{margin-top:12px;background:var(--panel);border:1px solid #27303c;border-radius:12px;padding:12px}.editor h2{font-size:15px;margin:0 0 10px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.field label{display:block;color:var(--muted);font-size:11px;margin-bottom:4px}.field input{width:100%;accent-color:var(--accent)}
+.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#252d39;color:#cbd5df;font-size:11px;margin-left:6px}
+@media(min-width:800px){.wrap{max-width:950px;margin:auto}canvas{height:520px}.grid{grid-template-columns:repeat(4,1fr)}}
+</style>
+</head>
+<body>
+<header><h1>ローソク足メーカー <span class="badge">最大10本</span></h1><div class="sub">教材・検証用のローソク足パターンを自由に作成</div></header>
+<div class="toolbar">
+<button class="up" id="addUp">＋ 陽線</button><button class="down" id="addDown">＋ 陰線</button>
+<button id="undo">↶ 戻す</button><button id="clear" class="danger">全削除</button><button id="save" class="primary">PNG保存</button>
+</div>
+<div class="wrap">
+<div class="stage"><canvas id="cv"></canvas></div>
+<div class="hint">ローソク足をタップして選択。足そのものを上下ドラッグすると全体移動。○ハンドルをドラッグすると高値・始値・終値・安値を個別調整できます。</div>
+<div class="editor" id="editor">
+<h2>選択中：<span id="selLabel">なし</span></h2>
+<div class="grid">
+<div class="field"><label>高値</label><input id="hi" type="range" min="0" max="100" step="1"></div>
+<div class="field"><label>始値</label><input id="op" type="range" min="0" max="100" step="1"></div>
+<div class="field"><label>終値</label><input id="cl" type="range" min="0" max="100" step="1"></div>
+<div class="field"><label>安値</label><input id="lo" type="range" min="0" max="100" step="1"></div>
+</div>
+<div class="row"><button id="toggle">陽線/陰線 反転</button><button id="left">← 左へ</button><button id="right">右へ →</button><button id="del" class="danger">この足を削除</button></div>
+</div>
+</div>
+<script>
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+const addUpBtn=$('addUp'), addDownBtn=$('addDown'), undoBtn=$('undo'), clearBtn=$('clear'), saveBtn=$('save');
+const delBtn=$('del'), toggleBtn=$('toggle'), leftBtn=$('left'), rightBtn=$('right');
+const hiEl=$('hi'), opEl=$('op'), clEl=$('cl'), loEl=$('lo');
+let candles=[],selected=-1,history=[],drag=null;
+function snap(){history.push(JSON.stringify(candles));if(history.length>40)history.shift()}
+function resize(){const dpr=devicePixelRatio||1,r=cv.getBoundingClientRect();cv.width=r.width*dpr;cv.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);draw()}
+addEventListener('resize',resize);
+function add(up){if(candles.length>=10)return; snap(); const base=50+(Math.random()*10-5); candles.push(up?{h:75,o:42,c:62,l:25}:{h:75,o:62,c:42,l:25}); selected=candles.length-1;sync();draw()}
+function geom(i){const w=cv.clientWidth,h=cv.clientHeight,n=Math.max(candles.length,1);const preferredGap=82;const sideMargin=36;const slot=Math.min(preferredGap,(w-sideMargin*2)/Math.max(n-1,1));const center=w/2;const x=center+(i-(n-1)/2)*slot;const bw=Math.min(42,slot*.52);return{x,bw,h}}
+function y(v){return 20+(100-v)/100*(cv.clientHeight-40)} function val(py){return Math.max(0,Math.min(100,100-(py-20)/(cv.clientHeight-40)*100))}
+function draw(exporting=false){const w=cv.clientWidth,h=cv.clientHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#0b0e13';ctx.fillRect(0,0,w,h);
+ctx.strokeStyle='#202733';ctx.lineWidth=1;for(let i=1;i<6;i++){let yy=i*h/6;ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(w,yy);ctx.stroke()}
+for(let i=0;i<candles.length;i++){const c=candles[i],g=geom(i),up=c.c>=c.o,col=up?'#ef5350':'#26a69a';ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(g.x,y(c.h));ctx.lineTo(g.x,y(c.l));ctx.stroke();let yt=Math.min(y(c.o),y(c.c)),yb=Math.max(y(c.o),y(c.c));ctx.fillRect(g.x-g.bw/2,yt,g.bw,Math.max(3,yb-yt));
+if(i===selected&&!exporting){ctx.strokeStyle='#70b7ff';ctx.lineWidth=2;ctx.strokeRect(g.x-g.bw/2-5,y(c.h)-9,g.bw+10,y(c.l)-y(c.h)+18);[['h',c.h],['o',c.o],['c',c.c],['l',c.l]].forEach(([k,v])=>{ctx.beginPath();ctx.fillStyle='#e9f4ff';ctx.strokeStyle='#4da3ff';ctx.arc(g.x,y(v),6,0,Math.PI*2);ctx.fill();ctx.stroke()})}
+// 左からの足番号。PNG保存時にも描画される。
+ctx.save();ctx.font='600 14px system-ui, -apple-system, Segoe UI, sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillStyle='#b8c2cf';ctx.fillText(String(i+1),g.x,h-5);ctx.restore();}
+}
+function hit(px,py){for(let i=candles.length-1;i>=0;i--){let g=geom(i),c=candles[i];if(Math.abs(px-g.x)<g.bw*.8&&py>=y(c.h)-14&&py<=y(c.l)+14)return i}return -1}
+function pointer(e){const r=cv.getBoundingClientRect(),p=e.touches?e.touches[0]:e;return{x:p.clientX-r.left,y:p.clientY-r.top}}
+function start(e){e.preventDefault();let p=pointer(e),i=hit(p.x,p.y);if(i<0){selected=-1;sync();draw();return}selected=i;sync();let c=candles[i],keys=['h','o','c','l'],nearest=keys.map(k=>[k,Math.abs(p.y-y(c[k]))]).sort((a,b)=>a[1]-b[1])[0];snap();drag={key:nearest[1]<12?nearest[0]:'all',startY:p.y,orig:{...c}};draw()}
+function move(e){if(!drag||selected<0)return;e.preventDefault();let p=pointer(e),c=candles[selected];if(drag.key==='all'){let dv=val(p.y)-val(drag.startY);for(let k of ['h','o','c','l'])c[k]=Math.max(0,Math.min(100,drag.orig[k]+dv))}else c[drag.key]=val(p.y);normalize(c,drag.key);sync();draw()}
+function end(){drag=null}
+function normalize(c,key){c.h=Math.max(c.h,c.o,c.c,c.l);c.l=Math.min(c.l,c.o,c.c,c.h);if(key==='h'){c.o=Math.min(c.o,c.h);c.c=Math.min(c.c,c.h);c.l=Math.min(c.l,c.h)}if(key==='l'){c.o=Math.max(c.o,c.l);c.c=Math.max(c.c,c.l);c.h=Math.max(c.h,c.l)}}
+cv.addEventListener('mousedown',start);cv.addEventListener('mousemove',move);addEventListener('mouseup',end);cv.addEventListener('touchstart',start,{passive:false});cv.addEventListener('touchmove',move,{passive:false});cv.addEventListener('touchend',end);
+function sync(){let c=candles[selected];document.getElementById('selLabel').textContent=c?`${selected+1}本目（${c.c>=c.o?'陽線':'陰線'}）`:'なし';for(let id of ['hi','op','cl','lo'])document.getElementById(id).disabled=!c;if(c){hiEl.value=c.h;opEl.value=c.o;clEl.value=c.c;loEl.value=c.l}}
+[['hi','h'],['op','o'],['cl','c'],['lo','l']].forEach(([id,k])=>document.getElementById(id).oninput=e=>{if(selected<0)return;candles[selected][k]=+e.target.value;normalize(candles[selected],k);sync();draw()});
+addUpBtn.onclick=()=>add(true);addDownBtn.onclick=()=>add(false);undoBtn.onclick=()=>{if(!history.length)return;candles=JSON.parse(history.pop());selected=Math.min(selected,candles.length-1);sync();draw()};clearBtn.onclick=()=>{if(!candles.length)return;snap();candles=[];selected=-1;sync();draw()};
+delBtn.onclick=()=>{if(selected<0)return;snap();candles.splice(selected,1);selected=Math.min(selected,candles.length-1);sync();draw()};toggleBtn.onclick=()=>{if(selected<0)return;snap();const c=candles[selected];const tmp=c.o;c.o=c.c;c.c=tmp;sync();draw()};
+leftBtn.onclick=()=>{if(selected<=0)return;snap();[candles[selected-1],candles[selected]]=[candles[selected],candles[selected-1]];selected--;sync();draw()};rightBtn.onclick=()=>{if(selected<0||selected>=candles.length-1)return;snap();[candles[selected+1],candles[selected]]=[candles[selected],candles[selected+1]];selected++;sync();draw()};
+saveBtn.onclick=()=>{let old=selected;selected=-1;draw(true);const a=document.createElement('a');a.download='candlestick-pattern.png';a.href=cv.toDataURL('image/png');a.click();selected=old;draw()};
+add(true);add(false);add(true);history=[];resize();
+</script>
+</body></html>
